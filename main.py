@@ -2,7 +2,6 @@ import logging
 import os
 
 import soundfile
-import torchaudio
 
 from sovits import infer_tool
 from sovits.infer_tool import Svc
@@ -22,7 +21,7 @@ id_list = [3]  # 每次同时合成多序号音色
 
 input_wav_path = "./wav_temp/input"
 out_wav_path = "./wav_temp/output"
-cut_time = 60
+cut_time = 30
 
 infer_tool.fill_a_to_b(trans, clean_names)
 infer_tool.mkdir([input_wav_path, out_wav_path])
@@ -44,8 +43,7 @@ for clean_name, tran in zip(clean_names, trans):
             raw_path = f"{input_wav_path}/{file_name}"
             out_path = f"{out_wav_path}/{file_name}"
 
-            raw_audio, raw_sr = torchaudio.load(raw_path)
-            out_audio, out_sr = svc_model.infer(spk_id, tran, raw_audio, raw_sr)
+            out_audio, out_sr = svc_model.infer(spk_id, tran, raw_path)
             soundfile.write(out_path, out_audio.cpu().numpy(), svc_model.target_sample)
 
             mistake, var = svc_model.calc_error(raw_path, out_path, tran)

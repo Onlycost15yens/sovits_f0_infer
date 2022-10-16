@@ -25,13 +25,11 @@ def voice_change_model():
     daw_sample = int(float(request_form.get("sampleRate", 0)))
     speaker_id = int(float(request_form.get("sSpeakId", 0)))
     # http获得wav文件并转换
-    input_wav_path = io.BytesIO(wave_file.read())
-    # 读取VST发送过来的音频
-    origin_audio, origin_audio_sr = torchaudio.load(input_wav_path)
-    # 重采样到模型所需的采样率
-    model_input_audio = torchaudio.functional.resample(origin_audio, origin_audio_sr, svc_model.target_sample)
+    input_wav_path = "http_temp.wav"  # io.BytesIO(wave_file.read())
+    with open(input_wav_path, "wb") as f:
+        f.write(wave_file.read())
     # 模型推理
-    out_audio, out_sr = svc_model.infer(speaker_id, f_pitch_change, model_input_audio)
+    out_audio, out_sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
     # 模型输出音频重采样到DAW所需采样率
     tar_audio = torchaudio.functional.resample(out_audio, svc_model.target_sample, daw_sample).cpu().numpy()
     # 返回音频
