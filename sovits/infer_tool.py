@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 
 import numpy as np
 import torch
@@ -117,6 +118,7 @@ def get_unit_pitch(in_path, tran, hubert_soft, feature_input, dev):
 
 class Svc(object):
     def __init__(self, model_path, config_path):
+        self.model_path = model_path
         self.dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.n_g_ms = None
         self.hps_ms = utils.get_hparams_from_file(config_path)
@@ -126,9 +128,9 @@ class Svc(object):
         self.hubert_soft = hubert_model.hubert_soft(get_end_file("./pth", "pt")[0])
         self.feature_input = FeatureInput(self.hps_ms.data.sampling_rate, self.hps_ms.data.hop_length)
 
-        self.load_model(model_path)
+        self.load_model()
 
-    def load_model(self, model_path):
+    def load_model(self):
         # 获取模型配置
         self.n_g_ms = SynthesizerTrn(
             178,
@@ -136,8 +138,11 @@ class Svc(object):
             self.hps_ms.train.segment_size // self.hps_ms.data.hop_length,
             n_speakers=self.hps_ms.data.n_speakers,
             **self.hps_ms.model)
-        _ = utils.load_checkpoint(model_path, self.n_g_ms, None)
-        _ = self.n_g_ms.eval().to(self.dev)
+        _ = utils.load_checkpoint(self.model_path, self.n_g_ms, None)
+        if "half" in self.model_path and torch.cuda.is_available():
+            _ = self.n_g_ms.half().eval().to(self.dev)
+        else:
+            _ = self.n_g_ms.eval().to(self.dev)
 
     def calc_error(self, in_path, out_path, tran):
         input_pitch = self.feature_input.compute_f0(in_path)
@@ -161,7 +166,10 @@ class Svc(object):
         sid = torch.LongTensor([int(speaker_id)]).to(self.dev)
         soft, pitch = get_unit_pitch(raw_path, tran, self.hubert_soft, self.feature_input, self.dev)
         pitch = torch.LongTensor(clean_pitch(pitch)).unsqueeze(0).to(self.dev)
-        stn_tst = torch.FloatTensor(soft)
+        if "half" in self.model_path and torch.cuda.is_available():
+            stn_tst = torch.HalfTensor(soft)
+        else:
+            stn_tst = torch.FloatTensor(soft)
         with torch.no_grad():
             x_tst = stn_tst.unsqueeze(0).to(self.dev)
             x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).to(self.dev)
