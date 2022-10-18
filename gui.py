@@ -4,7 +4,6 @@ import logging
 import gradio as gr
 import soundfile
 import torch
-import torchaudio
 
 from sovits import infer_tool
 from sovits.infer_tool import Svc
@@ -36,8 +35,7 @@ def infer(sid, audio_record, audio_upload, tran):
         audio_path = audio_record
     else:
         return "你需要上传wav文件或使用网页内置的录音！", None
-    raw_audio, raw_sr = torchaudio.load(audio_path)
-    o_audio, out_sr = svc_model.infer(spk_dict[sid], tran, raw_audio, raw_sr)
+    o_audio, out_sr = svc_model.infer(spk_dict[sid], tran, audio_path)
     o_audio = o_audio.cpu().numpy()
     out_path = f"./out_temp.wav"
     soundfile.write(out_path, o_audio, svc_model.target_sample)
