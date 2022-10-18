@@ -1,6 +1,6 @@
 # SoftVC VITS Singing Voice Conversion
 
-## 模型简介
+## 模型简介（**main分支为sovits2.1，2.0模型合成请下载2.0分支**）
 
 歌声音色转换模型，通过Soft-VC内容编码器提取源音频语音特征，并提取音频f0，将两者结合输入VITS替换原本的文本输入达到歌声转换的效果。
 
