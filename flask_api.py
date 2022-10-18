@@ -41,8 +41,8 @@ def voice_change_model():
 
 if __name__ == '__main__':
     # 每个模型和config是唯一对应的
-    model_name = "152_epochs.pth"
-    config_name = "nyarumul.json"
+    model_name = "243_epochs.pth"
+    config_name = "config.json"
     svc_model = Svc(f"pth/{model_name}", f"configs/{config_name}")
     # 此处与vst插件对应，不建议更改
     app.run(port=6842, host="0.0.0.0", debug=False, threaded=False)

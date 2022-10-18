@@ -15,4 +15,11 @@ def simplify_hubert(pth_name):
     torch.save(model, f"./pth/half_{pth_name}")
 
 
-simplify_hubert("hubert.pt")
+def clean_speaker(pth_name):
+    model = torch.load(f"./pth/{pth_name}")
+    for i in range(0, len(model['model']['emb_g.weight'])):
+        model['model']['emb_g.weight'][i] = 0
+    torch.save(model, f"./pth/clean_{pth_name}")
+
+
+clean_speaker("243_epochs.pth")
