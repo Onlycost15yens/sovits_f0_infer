@@ -9,15 +9,15 @@ from wav_temp import merge
 
 logging.getLogger('numba').setLevel(logging.WARNING)
 
-model_name = "350_epochs.pth"  # 模型名称（pth文件夹下）
+model_name = "524_epochs.pth"  # 模型名称（pth文件夹下）
 config_name = "config.json"
 svc_model = Svc(f"pth/{model_name}", f"configs/{config_name}")
 infer_tool.mkdir(["./raw", "./pth", "./results"])
 
 # 支持多个wav文件，放在raw文件夹下
-clean_names = ["时间煮雨"]
+clean_names = ["十年"]
 trans = [0]  # 音高调整，支持正负（半音）
-id_list = [1, 3]  # 每次同时合成多序号音色
+id_list = [0]  # 每次同时合成多序号音色
 
 input_wav_path = "./wav_temp/input"
 out_wav_path = "./wav_temp/output"
@@ -39,11 +39,13 @@ for clean_name, tran in zip(clean_names, trans):
         mis_list = []
         count = 0
         file_list = os.listdir(input_wav_path)
+        print(f"{clean_name}_{svc_model.speakers[spk_id]}")
         for file_name in file_list:
             raw_path = f"{input_wav_path}/{file_name}"
             out_path = f"{out_wav_path}/{file_name}"
 
             out_audio, out_sr = svc_model.infer(spk_id, tran, raw_path)
+            # out_audio, out_sr = svc_model.vc(2, spk_id, raw_path)
             soundfile.write(out_path, out_audio.cpu().numpy(), svc_model.target_sample)
 
             mistake, var = svc_model.calc_error(raw_path, out_path, tran)

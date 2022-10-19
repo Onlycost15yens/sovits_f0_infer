@@ -4,12 +4,14 @@ import shutil
 import subprocess
 import time
 
+import librosa
 import numpy as np
 import torch
 import torchaudio
 
 from sovits import hubert_model
 from sovits import utils
+from sovits.mel_processing import spectrogram_torch
 from sovits.models import SynthesizerTrn
 from sovits.preprocess_wave import FeatureInput
 
@@ -120,7 +122,7 @@ class Svc(object):
     def __init__(self, model_path, config_path):
         self.model_path = model_path
         self.dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.n_g_ms = None
+        self.net_g_ms = None
         self.hps_ms = utils.get_hparams_from_file(config_path)
         self.target_sample = self.hps_ms.data.sampling_rate
         self.speakers = self.hps_ms.speakers
@@ -132,17 +134,17 @@ class Svc(object):
 
     def load_model(self):
         # 获取模型配置
-        self.n_g_ms = SynthesizerTrn(
+        self.net_g_ms = SynthesizerTrn(
             178,
             self.hps_ms.data.filter_length // 2 + 1,
             self.hps_ms.train.segment_size // self.hps_ms.data.hop_length,
             n_speakers=self.hps_ms.data.n_speakers,
             **self.hps_ms.model)
-        _ = utils.load_checkpoint(self.model_path, self.n_g_ms, None)
+        _ = utils.load_checkpoint(self.model_path, self.net_g_ms, None)
         if "half" in self.model_path and torch.cuda.is_available():
-            _ = self.n_g_ms.half().eval().to(self.dev)
+            _ = self.net_g_ms.half().eval().to(self.dev)
         else:
-            _ = self.n_g_ms.eval().to(self.dev)
+            _ = self.net_g_ms.eval().to(self.dev)
 
     def calc_error(self, in_path, out_path, tran):
         input_pitch = self.feature_input.compute_f0(in_path)
@@ -173,8 +175,28 @@ class Svc(object):
         with torch.no_grad():
             x_tst = stn_tst.unsqueeze(0).to(self.dev)
             x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).to(self.dev)
-            audio = self.n_g_ms.infer(x_tst, x_tst_lengths, pitch, sid=sid, noise_scale=0.3, noise_scale_w=0.5,
-                                      length_scale=1)[0][0, 0].data.float()
+            audio = self.net_g_ms.infer(x_tst, x_tst_lengths, pitch, sid=sid, noise_scale=0.3, noise_scale_w=0.5,
+                                        length_scale=1)[0][0, 0].data.float()
+        return audio, audio.shape[-1]
+
+    def load_audio_to_torch(self, full_path):
+        audio, sampling_rate = librosa.load(full_path, sr=self.target_sample, mono=True)
+        return torch.FloatTensor(audio.astype(np.float32))
+
+    def vc(self, origin_id, target_id, raw_path):
+        audio = self.load_audio_to_torch(raw_path)
+        y = audio.unsqueeze(0).to(self.dev)
+
+        spec = spectrogram_torch(y, self.hps_ms.data.filter_length,
+                                 self.hps_ms.data.sampling_rate, self.hps_ms.data.hop_length,
+                                 self.hps_ms.data.win_length, center=False)
+        spec_lengths = torch.LongTensor([spec.size(-1)]).to(self.dev)
+        sid_src = torch.LongTensor([origin_id]).to(self.dev)
+
+        with torch.no_grad():
+            sid_tgt = torch.LongTensor([target_id]).to(self.dev)
+            audio = self.net_g_ms.voice_conversion(spec, spec_lengths, sid_src=sid_src, sid_tgt=sid_tgt)[0][
+                0, 0].data.float()
         return audio, audio.shape[-1]
 
     def format_wav(self, audio_path):
