@@ -15,9 +15,9 @@ svc_model = Svc(f"pth/{model_name}", f"configs/{config_name}")
 infer_tool.mkdir(["./raw", "./pth", "./results"])
 
 # 支持多个wav文件，放在raw文件夹下
-clean_names = ["十年"]
+clean_names = ["变成猫了"]
 trans = [0]  # 音高调整，支持正负（半音）
-id_list = [0]  # 每次同时合成多序号音色
+id_list = [0, 1]  # 每次同时合成多序号音色
 
 input_wav_path = "./wav_temp/input"
 out_wav_path = "./wav_temp/output"
