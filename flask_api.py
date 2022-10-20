@@ -26,23 +26,24 @@ class RealTimeVC:
 
     """输入输出都是1维numpy 音频波形数组"""
 
-    def process(self, speaker_id, f_pitch_change, wav, sr):
+    def process(self, speaker_id, f_pitch_change, input_wav_path):
+        audio, sr = torchaudio.load(input_wav_path)
+        temp_wav = io.BytesIO()
         if self.last_chunk is None:
-            soundfile.write("audio_temp.wav", wav, sr)
-            audio, sr = svc_model.infer(speaker_id, f_pitch_change, "audio_temp.wav")
+            soundfile.write(temp_wav, audio, sr, format="wav")
+            audio, sr = svc_model.infer(speaker_id, f_pitch_change, temp_wav)
             audio = audio.cpu().numpy()
             self.last_chunk = wav[-self.pre_len:]
             self.last_o = audio
             return audio[-self.chunk_len:]
         else:
-            input_wav = np.concatenate([self.last_chunk, wav])
-            soundfile.write("audio_temp.wav", input_wav, sr)
-            audio, sr = svc_model.infer(speaker_id, f_pitch_change, "audio_temp.wav")
+            audio = np.concatenate([self.last_chunk, wav])
+            soundfile.write(temp_wav, audio, sr, format="wav")
+            audio, sr = svc_model.infer(speaker_id, f_pitch_change, temp_wav)
             audio = audio.cpu().numpy()
             ret = maad.util.crossfade(self.last_o, audio, self.pre_len)
             self.last_chunk = wav[-self.pre_len:]
             self.last_o = audio
-
             return ret[self.chunk_len:2 * self.chunk_len]
 
 
@@ -56,24 +57,25 @@ def voice_change_model():
     daw_sample = int(float(request_form.get("sampleRate", 0)))
     speaker_id = int(float(request_form.get("sSpeakId", 0)))
     # http获得wav文件并转换
-    input_wav_path = "http_temp.wav"  # io.BytesIO(wave_file.read())
-    with open(input_wav_path, "wb") as f:
-        f.write(wave_file.read())
+    input_wav_path = io.BytesIO(wave_file.read())
+
     # 模型推理
-    out_audio, out_sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
-    # a, s = librosa.load(input_wav_path, mono=True)
-    # out_audio = svc.process(speaker_id, f_pitch_change, a, s)
-    # 模型输出音频重采样到DAW所需采样率
-    tar_audio = torchaudio.functional.resample(out_audio, svc_model.target_sample, daw_sample).cpu().numpy()
-    # tar_audio = librosa.resample(out_audio, svc_model.target_sample, daw_sample)
+    if raw_infer:
+        out_audio, out_sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
+        tar_audio = torchaudio.functional.resample(out_audio, svc_model.target_sample, daw_sample)
+    else:
+        out_audio = svc.process(speaker_id, f_pitch_change, input_wav_path)
+        tar_audio = torchaudio.functional.resample(torch.form_numpy(out_audio), svc_model.target_sample, daw_sample)
     # 返回音频
     out_wav_path = io.BytesIO()
-    soundfile.write(out_wav_path, tar_audio, daw_sample, format="wav")
+    soundfile.write(out_wav_path, tar_audio.cpu().numpy(), daw_sample, format="wav")
     out_wav_path.seek(0)
     return send_file(out_wav_path, download_name="temp.wav", as_attachment=True)
 
 
 if __name__ == '__main__':
+    # 启用则为直接切片合成，False为交叉淡化方式
+    raw_infer = False
     # 每个模型和config是唯一对应的
     model_name = "524_epochs.pth"
     config_name = "config.json"

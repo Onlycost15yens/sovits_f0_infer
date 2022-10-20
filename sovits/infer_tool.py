@@ -93,31 +93,6 @@ def mkdir(paths: list):
             os.mkdir(path)
 
 
-def get_units(in_path, hubert_soft, dev):
-    source, sr = torchaudio.load(in_path)
-    source = torchaudio.functional.resample(source, sr, 16000)
-    if len(source.shape) == 2 and source.shape[1] >= 2:
-        source = torch.mean(source, dim=0).unsqueeze(0)
-    source = source.unsqueeze(0).to(dev)
-    with torch.inference_mode():
-        units = hubert_soft.units(source)
-        return units
-
-
-def transcribe(source_path, length, transform, feature_input):
-    feature_pit = feature_input.compute_f0(source_path)
-    feature_pit = feature_pit * 2 ** (transform / 12)
-    feature_pit = resize2d_f0(feature_pit, length)
-    coarse_pit = feature_input.coarse_f0(feature_pit)
-    return coarse_pit
-
-
-def get_unit_pitch(in_path, tran, hubert_soft, feature_input, dev):
-    soft = get_units(in_path, hubert_soft, dev).squeeze(0).cpu().numpy()
-    input_pitch = transcribe(in_path, soft.shape[0], tran, feature_input)
-    return soft, input_pitch
-
-
 class Svc(object):
     def __init__(self, model_path, config_path):
         self.model_path = model_path
@@ -147,8 +122,10 @@ class Svc(object):
             _ = self.net_g_ms.eval().to(self.dev)
 
     def calc_error(self, in_path, out_path, tran):
-        input_pitch = self.feature_input.compute_f0(in_path)
-        output_pitch = self.feature_input.compute_f0(out_path)
+        a, s = torchaudio.load(in_path)
+        input_pitch = self.feature_input.compute_f0(a.cpu().numpy()[0], s)
+        a, s = torchaudio.load(out_path)
+        output_pitch = self.feature_input.compute_f0(a.cpu().numpy()[0], s)
         sum_y = []
         if np.sum(input_pitch == 0) / len(input_pitch) > 0.9:
             mistake, var_take = 0, 0
@@ -164,9 +141,31 @@ class Svc(object):
             var_take = round(float(np.std(sum_y, ddof=1)), 2)
         return mistake, var_take
 
+    def get_units(self, source, sr):
+        source = torchaudio.functional.resample(source, sr, 16000)
+        if len(source.shape) == 2 and source.shape[1] >= 2:
+            source = torch.mean(source, dim=0).unsqueeze(0)
+        source = source.unsqueeze(0).to(self.dev)
+        with torch.inference_mode():
+            units = self.hubert_soft.units(source)
+            return units
+
+    def transcribe(self, source, sr, length, transform):
+        feature_pit = self.feature_input.compute_f0(source, sr)
+        feature_pit = feature_pit * 2 ** (transform / 12)
+        feature_pit = resize2d_f0(feature_pit, length)
+        coarse_pit = self.feature_input.coarse_f0(feature_pit)
+        return coarse_pit
+
+    def get_unit_pitch(self, in_path, tran):
+        source, sr = torchaudio.load(in_path)
+        soft = self.get_units(source, sr).squeeze(0).cpu().numpy()
+        input_pitch = self.transcribe(source.cpu().numpy()[0], sr, soft.shape[0], tran)
+        return soft, input_pitch
+
     def infer(self, speaker_id, tran, raw_path):
         sid = torch.LongTensor([int(speaker_id)]).to(self.dev)
-        soft, pitch = get_unit_pitch(raw_path, tran, self.hubert_soft, self.feature_input, self.dev)
+        soft, pitch = self.get_unit_pitch(raw_path, tran)
         pitch = torch.LongTensor(clean_pitch(pitch)).unsqueeze(0).to(self.dev)
         if "half" in self.model_path and torch.cuda.is_available():
             stn_tst = torch.HalfTensor(soft)
