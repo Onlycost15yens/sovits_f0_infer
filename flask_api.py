@@ -4,6 +4,7 @@ import logging
 import maad
 import numpy as np
 import soundfile
+import torchaudio
 from flask import Flask, request, send_file
 from flask_cors import CORS
 
