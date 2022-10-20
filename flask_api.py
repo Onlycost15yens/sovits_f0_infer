@@ -75,7 +75,7 @@ def voice_change_model():
 
 if __name__ == '__main__':
     # 启用则为直接切片合成，False为交叉淡化方式
-    raw_infer = False
+    raw_infer = True
     # 每个模型和config是唯一对应的
     model_name = "524_epochs.pth"
     config_name = "config.json"
