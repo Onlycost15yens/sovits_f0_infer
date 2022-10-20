@@ -4,6 +4,7 @@ import logging
 import maad
 import numpy as np
 import soundfile
+import torch
 import torchaudio
 from flask import Flask, request, send_file
 from flask_cors import CORS
@@ -28,21 +29,23 @@ class RealTimeVC:
 
     def process(self, speaker_id, f_pitch_change, input_wav_path):
         audio, sr = torchaudio.load(input_wav_path)
+        audio = audio.cpu().numpy()[0]
         temp_wav = io.BytesIO()
         if self.last_chunk is None:
-            soundfile.write(temp_wav, audio, sr, format="wav")
-            audio, sr = svc_model.infer(speaker_id, f_pitch_change, temp_wav)
+            input_wav_path.seek(0)
+            audio, sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
             audio = audio.cpu().numpy()
-            self.last_chunk = wav[-self.pre_len:]
+            self.last_chunk = audio[-self.pre_len:]
             self.last_o = audio
             return audio[-self.chunk_len:]
         else:
-            audio = np.concatenate([self.last_chunk, wav])
+            audio = np.concatenate([self.last_chunk, audio])
             soundfile.write(temp_wav, audio, sr, format="wav")
+            temp_wav.seek(0)
             audio, sr = svc_model.infer(speaker_id, f_pitch_change, temp_wav)
             audio = audio.cpu().numpy()
             ret = maad.util.crossfade(self.last_o, audio, self.pre_len)
-            self.last_chunk = wav[-self.pre_len:]
+            self.last_chunk = audio[-self.pre_len:]
             self.last_o = audio
             return ret[self.chunk_len:2 * self.chunk_len]
 
@@ -65,7 +68,7 @@ def voice_change_model():
         tar_audio = torchaudio.functional.resample(out_audio, svc_model.target_sample, daw_sample)
     else:
         out_audio = svc.process(speaker_id, f_pitch_change, input_wav_path)
-        tar_audio = torchaudio.functional.resample(torch.form_numpy(out_audio), svc_model.target_sample, daw_sample)
+        tar_audio = torchaudio.functional.resample(torch.from_numpy(out_audio), svc_model.target_sample, daw_sample)
     # 返回音频
     out_wav_path = io.BytesIO()
     soundfile.write(out_wav_path, tar_audio.cpu().numpy(), daw_sample, format="wav")
@@ -75,6 +78,8 @@ def voice_change_model():
 
 if __name__ == '__main__':
     # 启用则为直接切片合成，False为交叉淡化方式
+    # vst插件调整0.3-0.5s切片时间可以降低延迟，直接切片方法会有连接处爆音、交叉淡化会有轻微重叠声音
+    # 自行选择能接受的方法，或将vst最大切片时间调整为1s，此处设为Ture，延迟大音质稳定一些
     raw_infer = True
     # 每个模型和config是唯一对应的
     model_name = "524_epochs.pth"
