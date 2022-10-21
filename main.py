@@ -17,7 +17,7 @@ infer_tool.mkdir(["./raw", "./pth", "./results"])
 # 支持多个wav文件，放在raw文件夹下
 clean_names = ["十年"]
 trans = [0]  # 音高调整，支持正负（半音）
-id_list = [2]  # 每次同时合成多序号音色
+id_list = [1]  # 每次同时合成多序号音色
 
 input_wav_path = "./wav_temp/input"
 out_wav_path = "./wav_temp/output"
@@ -45,6 +45,7 @@ for clean_name, tran in zip(clean_names, trans):
             out_path = f"{out_wav_path}/{file_name}"
 
             out_audio, out_sr = svc_model.infer(spk_id, tran, raw_path)
+            # svc方式，仅支持模型内部音色互转，不建议使用
             # out_audio, out_sr = svc_model.vc(2, spk_id, raw_path)
             soundfile.write(out_path, out_audio.cpu().numpy(), svc_model.target_sample)
 

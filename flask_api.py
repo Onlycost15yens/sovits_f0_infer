@@ -1,8 +1,6 @@
 import io
 import logging
 
-import maad
-import numpy as np
 import soundfile
 import torch
 import torchaudio
@@ -16,38 +14,6 @@ app = Flask(__name__)
 CORS(app)
 
 logging.getLogger('numba').setLevel(logging.WARNING)
-
-
-class RealTimeVC:
-    def __init__(self):
-        self.last_chunk = None
-        self.last_o = None
-        self.chunk_len = 16000  # 区块长度
-        self.pre_len = 3840  # 交叉淡化长度，640的倍数
-
-    """输入输出都是1维numpy 音频波形数组"""
-
-    def process(self, speaker_id, f_pitch_change, input_wav_path):
-        audio, sr = torchaudio.load(input_wav_path)
-        audio = audio.cpu().numpy()[0]
-        temp_wav = io.BytesIO()
-        if self.last_chunk is None:
-            input_wav_path.seek(0)
-            audio, sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
-            audio = audio.cpu().numpy()
-            self.last_chunk = audio[-self.pre_len:]
-            self.last_o = audio
-            return audio[-self.chunk_len:]
-        else:
-            audio = np.concatenate([self.last_chunk, audio])
-            soundfile.write(temp_wav, audio, sr, format="wav")
-            temp_wav.seek(0)
-            audio, sr = svc_model.infer(speaker_id, f_pitch_change, temp_wav)
-            audio = audio.cpu().numpy()
-            ret = maad.util.crossfade(self.last_o, audio, self.pre_len)
-            self.last_chunk = audio[-self.pre_len:]
-            self.last_o = audio
-            return ret[self.chunk_len:2 * self.chunk_len]
 
 
 @app.route("/voiceChangeModel", methods=["POST"])
@@ -67,7 +33,7 @@ def voice_change_model():
         out_audio, out_sr = svc_model.infer(speaker_id, f_pitch_change, input_wav_path)
         tar_audio = torchaudio.functional.resample(out_audio, svc_model.target_sample, daw_sample)
     else:
-        out_audio = svc.process(speaker_id, f_pitch_change, input_wav_path)
+        out_audio = svc.process(svc_model, speaker_id, f_pitch_change, input_wav_path)
         tar_audio = torchaudio.functional.resample(torch.from_numpy(out_audio), svc_model.target_sample, daw_sample)
     # 返回音频
     out_wav_path = io.BytesIO()
