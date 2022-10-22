@@ -1,6 +1,6 @@
 # SoftVC VITS Singing Voice Conversion
 
-## 模型简介（**main分支为sovits2.1，2.0模型合成请下载2.0分支**）
+## 模型简介（**main分支为sovits2.2（替换nsf声码器），2.0模型合成请下载2.0分支**）
 
 歌声音色转换模型，通过Soft-VC内容编码器提取源音频语音特征，并提取音频f0，将两者结合输入VITS替换原本的文本输入达到歌声转换的效果。
 
@@ -18,7 +18,7 @@ torch官网安装torch和相应的cuda：
 
 https://pytorch.org/get-started/locally/
 
-3.1 自行下载vst插件并搜索常用宿主软件的安装教程
+3.1 自行下载vst插件并搜索常用宿主软件的安装教程，宿主软件尽量装在c盘，反正不必要的bug
 
 https://github.com/zhaohui8969/VST_NetProcess-/releases/tag/v1.2
 
@@ -53,3 +53,16 @@ hubert地址：https://github.com/bshall/hubert/releases/tag/v0.1
 3.6 给某音轨挂载vst插件，打开录音准备、监听，录音输入增益可以调高一些，即可使用
 
 3.7 插件的音调调到中间左右，默认是-30，正常使用是-15~+15；音频最小切片时间调到0，响应速度会更快
+
+***************************************************************
+soft-vc+vits拼接:@innnky
+
+nsf-hifigan替换:@zhaohui8969
+***************************************************************
+Our codes are based on the following repos:
+
+encoder:https://github.com/bshall/soft-vc
+
+tts:https://github.com/jaywalnut310/vits
+
+nsf-hifigan:https://github.com/openvpi/DiffSinger
