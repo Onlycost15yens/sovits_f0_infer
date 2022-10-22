@@ -1,7 +1,7 @@
 import math
 
 import torch
-from torch.nn import functional as t_func
+from torch.nn import functional as F
 
 
 def init_weights(m, mean=0.0, std=0.01):
@@ -53,6 +53,36 @@ def slice_segments(x, ids_str, segment_size=4):
     return ret
 
 
+def slice_pitch_segments(x, ids_str, segment_size=4):
+    ret = torch.zeros_like(x[:, :segment_size])
+    for i in range(x.size(0)):
+        idx_str = ids_str[i]
+        idx_end = idx_str + segment_size
+        ret[i] = x[i, idx_str:idx_end]
+    return ret
+
+
+def rand_slice_segments(x, x_lengths=None, segment_size=4):
+    b, d, t = x.size()
+    if x_lengths is None:
+        x_lengths = t
+    ids_str_max = x_lengths - segment_size + 1
+    ids_str = (torch.rand([b]).to(device=x.device) * ids_str_max).to(dtype=torch.long)
+    ret = slice_segments(x, ids_str, segment_size)
+    return ret, ids_str
+
+
+def rand_slice_segments_with_pitch(x, pitch, x_lengths=None, segment_size=4):
+    b, d, t = x.size()
+    if x_lengths is None:
+        x_lengths = t
+    ids_str_max = x_lengths - segment_size + 1
+    ids_str = (torch.rand([b]).to(device=x.device) * ids_str_max).to(dtype=torch.long)
+    ret = slice_segments(x, ids_str, segment_size)
+    ret_pitch = slice_pitch_segments(pitch, ids_str, segment_size)
+    return ret, ret_pitch, ids_str
+
+
 def get_timing_signal_1d(
         length, channels, min_timescale=1.0, max_timescale=1.0e4):
     position = torch.arange(length, dtype=torch.float)
@@ -64,9 +94,21 @@ def get_timing_signal_1d(
         torch.arange(num_timescales, dtype=torch.float) * -log_timescale_increment)
     scaled_time = position.unsqueeze(0) * inv_timescales.unsqueeze(1)
     signal = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], 0)
-    signal = t_func.pad(signal, [0, 0, 0, channels % 2])
+    signal = F.pad(signal, [0, 0, 0, channels % 2])
     signal = signal.view(1, channels, length)
     return signal
+
+
+def add_timing_signal_1d(x, min_timescale=1.0, max_timescale=1.0e4):
+    b, channels, length = x.size()
+    signal = get_timing_signal_1d(length, channels, min_timescale, max_timescale)
+    return x + signal.to(dtype=x.dtype, device=x.device)
+
+
+def cat_timing_signal_1d(x, min_timescale=1.0, max_timescale=1.0e4, axis=1):
+    b, channels, length = x.size()
+    signal = get_timing_signal_1d(length, channels, min_timescale, max_timescale)
+    return torch.cat([x, signal.to(dtype=x.dtype, device=x.device)], axis)
 
 
 def subsequent_mask(length):
@@ -91,7 +133,7 @@ def convert_pad_shape(pad_shape):
 
 
 def shift_1d(x):
-    x = t_func.pad(x, convert_pad_shape([[0, 0], [0, 0], [1, 0]]))[:, :, :-1]
+    x = F.pad(x, convert_pad_shape([[0, 0], [0, 0], [1, 0]]))[:, :, :-1]
     return x
 
 
@@ -107,13 +149,15 @@ def generate_path(duration, mask):
     duration: [b, 1, t_x]
     mask: [b, 1, t_y, t_x]
     """
+    device = duration.device
+
     b, _, t_y, t_x = mask.shape
     cum_duration = torch.cumsum(duration, -1)
 
     cum_duration_flat = cum_duration.view(b * t_x)
     path = sequence_mask(cum_duration_flat, t_y).to(mask.dtype)
     path = path.view(b, t_x, t_y)
-    path = path - t_func.pad(path, convert_pad_shape([[0, 0], [1, 0], [0, 0]]))[:, :-1]
+    path = path - F.pad(path, convert_pad_shape([[0, 0], [1, 0], [0, 0]]))[:, :-1]
     path = path.unsqueeze(1).transpose(2, 3) * mask
     return path
 
@@ -121,7 +165,7 @@ def generate_path(duration, mask):
 def clip_grad_value_(parameters, clip_value, norm_type=2):
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    parameters = list(filter(lambda para: para.grad is not None, parameters))
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
     norm_type = float(norm_type)
     if clip_value is not None:
         clip_value = float(clip_value)
