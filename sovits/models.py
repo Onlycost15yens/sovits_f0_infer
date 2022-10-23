@@ -11,6 +11,9 @@ from sovits.commons import init_weights, get_padding
 from sovits.vdecoder.hifigan.hifigan import HifiGanGenerator
 
 
+# import monotonic_align
+
+
 class TextEncoder(nn.Module):
     def __init__(self,
                  n_vocab,
@@ -364,23 +367,26 @@ class SynthesizerTrn(nn.Module):
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
     def forward(self, x, x_lengths, y, y_lengths, pitch, sid=None):
+        assert 0 <= y.shape[2] - x.shape[1] * 2 <= 1, (y.shape[2], x.shape[1] * 2, sid)
+        if y.shape[2] != x.shape[1] * 2:
+            y_lengths[y_lengths == y.shape[2]] -= 1
+            y = y[:, :, :x.shape[1] * 2]
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, pitch)
-
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
-
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
-
         z_p = self.flow(z, y_mask, g=g)
-        #         print(f"z_p: {z_p.shape}")
 
-        z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z, pitch, y_lengths, self.segment_size)
-        # print(f"z_slice: {z_slice.shape}")
-
-        # o = self.dec(z_slice, g=g)
+        m_p = torch.repeat_interleave(m_p, repeats=2, dim=2)
+        logs_p = torch.repeat_interleave(logs_p, repeats=2, dim=2)
+        # print(x.shape, y.shape, z.shape, pitch.shape)
+        z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z, torch.repeat_interleave(pitch,
+                                                                                                            repeats=2,
+                                                                                                            dim=1),
+                                                                                 y_lengths, self.segment_size)
         o = self.dec(z_slice, f0=pitch_slice)
         return o, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
 
@@ -390,10 +396,15 @@ class SynthesizerTrn(nn.Module):
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
+        m_p = torch.repeat_interleave(m_p, repeats=2, dim=2)
+        logs_p = torch.repeat_interleave(logs_p, repeats=2, dim=2)
+        x_mask = torch.repeat_interleave(x_mask, repeats=2, dim=2)
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
         z = self.flow(z_p, x_mask, g=g, reverse=True)
         # o = self.dec((z * x_mask)[:, :, :max_len], g=g)
-        o = self.dec((z * x_mask)[:, :, :max_len], f0=pitch)
+        # print(x.shape, pitch.shape, sid)
+        # print()
+        o = self.dec((z * x_mask)[:, :, :max_len], f0=torch.repeat_interleave(pitch, repeats=2, dim=1))
         return o, x_mask, (z, z_p, m_p, logs_p)
 
     def voice_conversion(self, y, y_lengths, sid_src, sid_tgt):
