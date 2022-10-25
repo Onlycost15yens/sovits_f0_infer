@@ -121,14 +121,14 @@ def main(args):
     # sess_options.enable_profiling = True
     # sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
     # sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    # ort_session = ort.InferenceSession(args.output_vits_onnx,
-    #                                    sess_options=sess_options,
-    #                                    providers=[("CUDAExecutionProvider", {"cudnn_conv_use_max_workspace": '1'})])
-    ort_session = ort.InferenceSession(r"D:\codes\sovits_aishell3\onnxmodel334.onnx",
+    ort_session = ort.InferenceSession(args.output_vits_onnx,
                                        sess_options=sess_options,
-                                       providers=['CUDAExecutionProvider', ])
+                                       providers=[("CUDAExecutionProvider", {"cudnn_conv_use_max_workspace": '1'})])
+    # ort_session = ort.InferenceSession(r"D:\codes\sovits_aishell3\onnxmodel334.onnx",
+    #                                    sess_options=sess_options,
+    #                                    providers=['CUDAExecutionProvider', ])
 
-    test_hidden_unit = torch.rand(1, 50, 258)
+    # test_hidden_unit = torch.rand(1, 50, 258)
     print("vits onnx benchmark")
     use_time_list = []
     for i in range(30):
@@ -136,15 +136,15 @@ def main(args):
         outputs = ort_session.run(
             output_names,
             {
-                # "hidden_unit": test_hidden_unit.numpy(),
-                # "lengths": test_lengths.numpy(),
-                # "pitch": test_pitch.numpy(),
-                # "sid": test_sid.numpy(),
+                "hidden_unit": test_hidden_unit.numpy(),
+                "lengths": test_lengths.numpy(),
+                "pitch": test_pitch.numpy(),
+                "sid": test_sid.numpy(),
 
-                "x": test_hidden_unit.numpy(),
-                'x_lengths': test_lengths.numpy(),
-                'sid': test_sid.numpy(),
-                "noise_scale": [0.667], "length_scale": [1.0], "noise_scale_w": [0.8]
+                # "x": test_hidden_unit.numpy(),
+                # 'x_lengths': test_lengths.numpy(),
+                # 'sid': test_sid.numpy(),
+                # "noise_scale": [0.667], "length_scale": [1.0], "noise_scale_w": [0.8]
             }
         )
         use_time = time.time() - start
