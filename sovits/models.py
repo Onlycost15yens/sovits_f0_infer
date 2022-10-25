@@ -396,15 +396,21 @@ class SynthesizerTrn(nn.Module):
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
-        m_p = torch.repeat_interleave(m_p, repeats=2, dim=2)
-        logs_p = torch.repeat_interleave(logs_p, repeats=2, dim=2)
-        x_mask = torch.repeat_interleave(x_mask, repeats=2, dim=2)
+        # torch.repeat_interleave会在ONNX导出时生成ONNX.Loop节点，导致在CUDA EP上性能急剧下降
+        # m_p = torch.repeat_interleave(m_p, repeats=2, dim=2)
+        m_p = torch.stack([m_p, m_p], -1).reshape(m_p.shape[0], m_p.shape[1], -1)
+        # logs_p = torch.repeat_interleave(logs_p, repeats=2, dim=2)
+        logs_p = torch.stack([logs_p, logs_p], -1).reshape(logs_p.shape[0], logs_p.shape[1], -1)
+        # x_mask = torch.repeat_interleave(x_mask, repeats=2, dim=2)
+        x_mask = torch.stack([x_mask, x_mask], -1).reshape(x_mask.shape[0], x_mask.shape[1], -1)
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
         z = self.flow(z_p, x_mask, g=g, reverse=True)
         # o = self.dec((z * x_mask)[:, :, :max_len], g=g)
         # print(x.shape, pitch.shape, sid)
         # print()
-        o = self.dec((z * x_mask)[:, :, :max_len], f0=torch.repeat_interleave(pitch, repeats=2, dim=1))
+        # pitch = torch.repeat_interleave(pitch, repeats=2, dim=1)
+        pitch = torch.stack([pitch, pitch], -1).reshape(pitch.shape[0], -1)
+        o = self.dec((z * x_mask)[:, :, :max_len], f0=pitch)
         return o, x_mask, (z, z_p, m_p, logs_p)
 
     def voice_conversion(self, y, y_lengths, sid_src, sid_tgt):
@@ -416,3 +422,21 @@ class SynthesizerTrn(nn.Module):
         z_hat = self.flow(z_p, y_mask, g=g_tgt, reverse=True)
         o_hat = self.dec(z_hat * y_mask, g=g_tgt)
         return o_hat, y_mask, (z, z_p, z_hat)
+
+
+class SynthesizerTrnForONNX(SynthesizerTrn):
+    def forward(self, x, x_lengths, pitch, sid):
+        """
+        用作ONNX导出
+        Args:
+            x:
+            x_lengths:
+            pitch:
+            sid:
+
+        Returns:
+
+        """
+        noise_scale = 1
+        max_len = None
+        return self.infer(x, x_lengths, pitch, sid, noise_scale=noise_scale, max_len=max_len)[0]

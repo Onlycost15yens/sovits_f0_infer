@@ -65,11 +65,14 @@ class HubertSoft(Hubert):
     def __init__(self):
         super().__init__()
 
-    @torch.inference_mode()
+    # @torch.inference_mode()
     def units(self, wav: torch.Tensor) -> torch.Tensor:
-        wav = t_func.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
+        wav = torch.nn.functional.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
         x, _ = self.encode(wav)
         return self.proj(x)
+
+    def forward(self, wav: torch.Tensor):
+        return self.units(wav)
 
 
 class FeatureExtractor(nn.Module):

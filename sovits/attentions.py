@@ -154,14 +154,15 @@ class MultiHeadAttention(nn.Module):
 
     def attention(self, query, key, value, mask=None):
         # reshape [b, d, t] -> [b, n_h, t, d_k]
-        b, d, t_s, t_t = (*key.size(), query.size(2))
+        # b, d, t_s, t_t = (*key.size(), query.size(2))
+        b, d, t_s, t_t = key.size()[0], key.size()[1], key.size()[2], query.size(2)
         query = query.view(b, self.n_heads, self.k_channels, t_t).transpose(2, 3)
         key = key.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
         value = value.view(b, self.n_heads, self.k_channels, t_s).transpose(2, 3)
 
         scores = torch.matmul(query / math.sqrt(self.k_channels), key.transpose(-2, -1))
         if self.window_size is not None:
-            assert t_s == t_t, "Relative attention is only available for self-attention."
+            # assert t_s == t_t, "Relative attention is only available for self-attention."
             key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s)
             rel_logits = self._matmul_with_relative_keys(query / math.sqrt(self.k_channels), key_relative_embeddings)
             scores_local = self._relative_position_to_absolute_position(rel_logits)
@@ -206,15 +207,24 @@ class MultiHeadAttention(nn.Module):
     def _get_relative_embeddings(self, relative_embeddings, length):
         max_relative_position = 2 * self.window_size + 1
         # Pad first before slice to avoid using cond ops.
-        pad_length = max(length - (self.window_size + 1), 0)
-        slice_start_position = max((self.window_size + 1) - length, 0)
+        # pad_length = max(length - (self.window_size + 1), 0)
+        # slice_start_position = max((self.window_size + 1) - length, 0)
+        tmp_a = length - (self.window_size + 1)
+        pad_length = torch.where(torch.tensor(tmp_a) > 0, tmp_a, 0)
+        tmp_b = (self.window_size + 1) - length
+        slice_start_position = torch.where(torch.tensor(tmp_b)  > 0, tmp_b, 0)
         slice_end_position = slice_start_position + 2 * length - 1
-        if pad_length > 0:
-            padded_relative_embeddings = t_func.pad(
-                relative_embeddings,
-                commons.convert_pad_shape([[0, 0], [pad_length, pad_length], [0, 0]]))
-        else:
-            padded_relative_embeddings = relative_embeddings
+        # if pad_length > 0:
+        #     pad_shape = commons.convert_pad_shape([[0, 0], [pad_length, pad_length], [0, 0]])
+        #     padded_relative_embeddings = t_func.pad(
+        #         relative_embeddings,
+        #         pad_shape)
+        # else:
+        #     padded_relative_embeddings = relative_embeddings
+        pad_shape = commons.convert_pad_shape([[0, 0], [pad_length, pad_length], [0, 0]])
+        padded_relative_embeddings = t_func.pad(
+            relative_embeddings,
+            pad_shape)
         used_relative_embeddings = padded_relative_embeddings[:, slice_start_position:slice_end_position]
         return used_relative_embeddings
 
