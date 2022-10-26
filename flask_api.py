@@ -7,7 +7,7 @@ import torchaudio
 from flask import Flask, request, send_file
 from flask_cors import CORS
 
-from sovits.infer_tool import Svc, RealTimeVC
+from sovits.infer_tool import Svc, RealTimeVC, SvcONNXInferModel
 
 app = Flask(__name__)
 
@@ -48,9 +48,18 @@ if __name__ == '__main__':
     # 自行选择能接受的方法，或将vst最大切片时间调整为1s，此处设为Ture，延迟大音质稳定一些
     raw_infer = True
     # 每个模型和config是唯一对应的
-    model_name = "113_epochs.pth"
-    config_name = "yilanqiu.json"
-    svc_model = Svc(f"pth/{model_name}", f"configs/{config_name}")
+    model_name = "121_epochs.pth"
+    config_name = "nyarumul.json"
+    # 是否使用ONNX模型
+    use_onnx_model = False
+    hubert_onnx = "./pth/hubert.onnx"
+    vits_onnx = "./pth/121_epochs.onnx"
+    if use_onnx_model:
+        svc_model = SvcONNXInferModel(hubert_onnx=hubert_onnx,
+                                      vits_onnx=vits_onnx,
+                                      config_path=f"configs/{config_name}")
+    else:
+        svc_model = Svc(f"pth/{model_name}", f"configs/{config_name}")
     svc = RealTimeVC()
     # 此处与vst插件对应，不建议更改
     app.run(port=6842, host="0.0.0.0", debug=False, threaded=False)

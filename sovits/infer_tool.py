@@ -1,4 +1,5 @@
 import logging
+import time
 import os
 import shutil
 import subprocess
@@ -7,13 +8,14 @@ import time
 import librosa
 import maad
 import numpy as np
+import onnxruntime
 import torch
 import torchaudio
 
 from sovits import hubert_model
 from sovits import utils
 from sovits.mel_processing import spectrogram_torch
-from sovits.models import SynthesizerTrn
+from sovits.models import SynthesizerTrn, SynthesizerTrnForONNX
 from sovits.preprocess_wave import FeatureInput
 
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
@@ -95,29 +97,41 @@ def mkdir(paths: list):
 
 
 class Svc(object):
-    def __init__(self, model_path, config_path):
-        self.model_path = model_path
+    def __init__(self, net_g_path, config_path, hubert_path="./pth/hubert.pt",
+                 onnx=False):
+        self.onnx = onnx
+        self.net_g_path = net_g_path
+        self.hubert_path = hubert_path
         self.dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net_g_ms = None
         self.hps_ms = utils.get_hparams_from_file(config_path)
         self.target_sample = self.hps_ms.data.sampling_rate
         self.speakers = self.hps_ms.speakers
         # 加载hubert
-        self.hubert_soft = hubert_model.hubert_soft(get_end_file("./pth", "pt")[0])
+        self.hubert_soft = hubert_model.hubert_soft(hubert_path)
         self.feature_input = FeatureInput(self.hps_ms.data.sampling_rate, self.hps_ms.data.hop_length)
 
         self.load_model()
 
     def load_model(self):
         # 获取模型配置
-        self.net_g_ms = SynthesizerTrn(
-            178,
-            self.hps_ms.data.filter_length // 2 + 1,
-            self.hps_ms.train.segment_size // self.hps_ms.data.hop_length,
-            n_speakers=self.hps_ms.data.n_speakers,
-            **self.hps_ms.model)
-        _ = utils.load_checkpoint(self.model_path, self.net_g_ms, None)
-        if "half" in self.model_path and torch.cuda.is_available():
+        if self.onnx:
+            self.net_g_ms = SynthesizerTrnForONNX(
+                178,
+                self.hps_ms.data.filter_length // 2 + 1,
+                self.hps_ms.train.segment_size // self.hps_ms.data.hop_length,
+                n_speakers=self.hps_ms.data.n_speakers,
+                **self.hps_ms.model)
+            _ = utils.load_checkpoint(self.net_g_path, self.net_g_ms, None)
+        else:
+            self.net_g_ms = SynthesizerTrn(
+                178,
+                self.hps_ms.data.filter_length // 2 + 1,
+                self.hps_ms.train.segment_size // self.hps_ms.data.hop_length,
+                n_speakers=self.hps_ms.data.n_speakers,
+                **self.hps_ms.model)
+            _ = utils.load_checkpoint(self.net_g_path, self.net_g_ms, None)
+        if "half" in self.net_g_path and torch.cuda.is_available():
             _ = self.net_g_ms.half().eval().to(self.dev)
         else:
             _ = self.net_g_ms.eval().to(self.dev)
@@ -148,7 +162,10 @@ class Svc(object):
             source = torch.mean(source, dim=0).unsqueeze(0)
         source = source.unsqueeze(0).to(self.dev)
         with torch.inference_mode():
+            start = time.time()
             units = self.hubert_soft.units(source)
+            use_time = time.time() - start
+            print("hubert use time:{}".format(use_time))
             return units
 
     def transcribe(self, source, sr, length, transform):
@@ -168,15 +185,18 @@ class Svc(object):
         sid = torch.LongTensor([int(speaker_id)]).to(self.dev)
         soft, pitch = self.get_unit_pitch(raw_path, tran)
         pitch = torch.LongTensor(clean_pitch(pitch)).unsqueeze(0).to(self.dev)
-        if "half" in self.model_path and torch.cuda.is_available():
+        if "half" in self.net_g_path and torch.cuda.is_available():
             stn_tst = torch.HalfTensor(soft)
         else:
             stn_tst = torch.FloatTensor(soft)
         with torch.no_grad():
             x_tst = stn_tst.unsqueeze(0).to(self.dev)
             x_tst_lengths = torch.LongTensor([stn_tst.size(0)]).to(self.dev)
+            start = time.time()
             audio = self.net_g_ms.infer(x_tst, x_tst_lengths, pitch, sid=sid, noise_scale=0.3, noise_scale_w=0.5,
                                         length_scale=1)[0][0, 0].data.float()
+            use_time = time.time() - start
+            print("vits use time:{}".format(use_time))
         return audio, audio.shape[-1]
 
     def load_audio_to_torch(self, full_path):
@@ -213,6 +233,74 @@ class Svc(object):
         if len(tar_audio.shape) == 2 and tar_audio.shape[1] >= 2:
             tar_audio = torch.mean(tar_audio, dim=0).unsqueeze(0)
         return tar_audio.cpu().numpy(), self.target_sample
+
+
+class SvcONNXInferModel(object):
+    def __init__(self, hubert_onnx, vits_onnx, config_path):
+        self.config_path = config_path
+        self.vits_onnx = vits_onnx
+        self.hubert_onnx = hubert_onnx
+        self.hubert_onnx_session = onnxruntime.InferenceSession(hubert_onnx, providers=['CUDAExecutionProvider', ])
+        self.inspect_onnx(self.hubert_onnx_session)
+        self.vits_onnx_session = onnxruntime.InferenceSession(vits_onnx, providers=['CUDAExecutionProvider', ])
+        self.inspect_onnx(self.vits_onnx_session)
+        self.hps_ms = utils.get_hparams_from_file(self.config_path)
+        self.target_sample = self.hps_ms.data.sampling_rate
+        self.feature_input = FeatureInput(self.hps_ms.data.sampling_rate, self.hps_ms.data.hop_length)
+
+    @staticmethod
+    def inspect_onnx(session):
+        for i in session.get_inputs():
+            print("name:{}\tshape:{}\tdtype:{}".format(i.name, i.shape, i.type))
+        for i in session.get_outputs():
+            print("name:{}\tshape:{}\tdtype:{}".format(i.name, i.shape, i.type))
+
+    def infer(self, speaker_id, tran, raw_path):
+        sid = np.array([int(speaker_id)], dtype=np.int64)
+        soft, pitch = self.get_unit_pitch(raw_path, tran)
+        pitch = np.expand_dims(pitch, axis=0).astype(np.int64)
+        stn_tst = soft
+        x_tst = np.expand_dims(stn_tst, axis=0)
+        x_tst_lengths = np.array([stn_tst.shape[0]], dtype=np.int64)
+        # 使用ONNX Runtime进行推理
+        start = time.time()
+        audio = self.vits_onnx_session.run(output_names=["audio"],
+                                           input_feed={
+                                               "hidden_unit": x_tst,
+                                               "lengths": x_tst_lengths,
+                                               "pitch": pitch,
+                                               "sid": sid,
+                                           })[0][0, 0]
+        use_time = time.time() - start
+        print("vits_onnx_session.run time:{}".format(use_time))
+        audio = torch.from_numpy(audio)
+        return audio, audio.shape[-1]
+
+    def get_units(self, source, sr):
+        source = torchaudio.functional.resample(source, sr, 16000)
+        if len(source.shape) == 2 and source.shape[1] >= 2:
+            source = torch.mean(source, dim=0).unsqueeze(0)
+        source = source.unsqueeze(0)
+        # 使用ONNX Runtime进行推理
+        start = time.time()
+        units = self.hubert_onnx_session.run(output_names=["embed"],
+                                             input_feed={"source": source.numpy()})[0]
+        use_time = time.time() - start
+        print("hubert_onnx_session.run time:{}".format(use_time))
+        return units
+
+    def transcribe(self, source, sr, length, transform):
+        feature_pit = self.feature_input.compute_f0(source, sr)
+        feature_pit = feature_pit * 2 ** (transform / 12)
+        feature_pit = resize2d_f0(feature_pit, length)
+        coarse_pit = self.feature_input.coarse_f0(feature_pit)
+        return coarse_pit
+
+    def get_unit_pitch(self, in_path, tran):
+        source, sr = torchaudio.load(in_path)
+        soft = self.get_units(source, sr).squeeze(0)
+        input_pitch = self.transcribe(source.numpy()[0], sr, soft.shape[0], tran)
+        return soft, input_pitch
 
 
 class RealTimeVC:
