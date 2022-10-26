@@ -10,6 +10,7 @@
 import argparse
 import time
 
+import numpy as np
 import onnx
 from onnxsim import simplify
 import onnxruntime as ort
@@ -38,32 +39,33 @@ def main(args):
               onnx=True)
     hubert = svc.hubert_soft
 
-    # # 转为ONNX
-    # test_input = torch.rand(1, 1, 16000)
-    # input_names = ["source", ]
-    # output_names = ["embed", ]
-    # torch.onnx.export(hubert,
-    #                   test_input.to(device),
-    #                   args.output_hubert_onnx,
-    #                   dynamic_axes={
-    #                       "source": {
-    #                           2: "sample_length"
-    #                       }
-    #                   },
-    #                   verbose=False,
-    #                   input_names=input_names,
-    #                   output_names=output_names)
-    # # 使用不同shape的数据对ONNX输出结果进行验证
-    # origin_output = hubert(test_input.to(device)).detach().cpu().numpy()
-    # ort_session = ort.InferenceSession(args.output_hubert_onnx, providers=['CPUExecutionProvider', ])
-    #
-    # outputs = ort_session.run(
-    #     output_names,
-    #     {"source": test_input.numpy()}
-    # )
-    # onnx_output = outputs[0]
-    # right = np.allclose(origin_output, onnx_output, rtol=0.1, atol=0.1)
-    # print("Hubert ONNX right: {}".format(right))
+    # 转为ONNX
+    test_input = torch.rand(1, 1, 16000)
+    input_names = ["source", ]
+    output_names = ["embed", ]
+    torch.onnx.export(hubert,
+                      test_input.to(device),
+                      args.output_hubert_onnx,
+                      dynamic_axes={
+                          "source": {
+                              2: "sample_length"
+                          }
+                      },
+                      verbose=False,
+                      opset_version=13,
+                      input_names=input_names,
+                      output_names=output_names)
+    # 使用不同shape的数据对ONNX输出结果进行验证
+    origin_output = hubert(test_input.to(device)).detach().cpu().numpy()
+    ort_session = ort.InferenceSession(args.output_hubert_onnx, providers=['CPUExecutionProvider', ])
+
+    outputs = ort_session.run(
+        output_names,
+        {"source": test_input.numpy()}
+    )
+    onnx_output = outputs[0]
+    right = np.allclose(origin_output, onnx_output, rtol=0.1, atol=0.1)
+    print("Hubert ONNX right: {}".format(right))
 
     # 实例化模型
     net_g = svc.net_g_ms
@@ -93,13 +95,13 @@ def main(args):
                           test_sid.to(device)
                       ),
                       args.output_vits_onnx,
-                      # dynamic_axes={
-                      #     "hidden_unit": [0, 1, 2],
-                      #     "pitch": [0, 1]
-                      # },
+                      dynamic_axes={
+                          "hidden_unit": [0, 1],
+                          "pitch": [1]
+                      },
                       do_constant_folding=False,
                       opset_version=13,
-                      verbose=True,
+                      verbose=False,
                       input_names=input_names,
                       output_names=output_names)
 
@@ -123,7 +125,7 @@ def main(args):
     # sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     ort_session = ort.InferenceSession(args.output_vits_onnx,
                                        sess_options=sess_options,
-                                       providers=[("CUDAExecutionProvider", {"cudnn_conv_use_max_workspace": '1'})])
+                                       providers=["CUDAExecutionProvider", ])
     # ort_session = ort.InferenceSession(r"D:\codes\sovits_aishell3\onnxmodel334.onnx",
     #                                    sess_options=sess_options,
     #                                    providers=['CUDAExecutionProvider', ])
@@ -155,7 +157,7 @@ def main(args):
     print("mean_use_time:{}".format(mean_use_time))
     onnx_output = outputs[0]
     # VITS的推理过程有随机过程，这里不验证输出结果的数值是否一致
-    assert onnx_output.shape == origin_output.shape
+    #assert onnx_output.shape == origin_output.shape
     print("Done")
 
 
