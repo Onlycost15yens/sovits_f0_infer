@@ -1,8 +1,5 @@
 import logging
-import time
 import os
-import shutil
-import subprocess
 import time
 
 import librosa
@@ -29,16 +26,6 @@ def timeit(func):
         return res
 
     return run
-
-
-def cut_wav(raw_audio_path, out_audio_name, input_wav_path, cut_time):
-    raw_audio, raw_sr = torchaudio.load(raw_audio_path)
-    if raw_audio.shape[-1] / raw_sr > cut_time:
-        subprocess.Popen(
-            f"python ./sovits/slicer.py {raw_audio_path} --out_name {out_audio_name} --out {input_wav_path}  --db_thresh -30",
-            shell=True).wait()
-    else:
-        shutil.copy(raw_audio_path, f"{input_wav_path}/{out_audio_name}-00.wav")
 
 
 def get_end_file(dir_path, end):
@@ -77,11 +64,6 @@ def plt_pitch(input_pitch):
 def f0_to_pitch(ff):
     f0_pitch = 69 + 12 * np.log2(ff / 440)
     return f0_pitch
-
-
-def del_temp_wav(path_data):
-    for i in get_end_file(path_data, "wav"):  # os.listdir(path_data)#返回一个列表，里面是当前目录下面的所有东西的相对路径
-        os.remove(i)
 
 
 def fill_a_to_b(a, b):
